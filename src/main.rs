@@ -5,82 +5,33 @@ mod shader;
 type Color = (u8, u8, u8);
 
 struct State {
-    tabs: Vec<Tab>,
-    current_tab: usize,
     win_width: f32,
     win_height: f32,
+    vao: NativeVertexArray,
 }
 
-impl State {
-    fn new() -> Self {
-        let mut tabs = Vec::new();
-        let default = Tab::new();
-        tabs.push(default);
+fn gen_vao(win_width: f32, win_height: f32, gl: &glow::Context) -> NativeVertexArray {
+    let top_left = pixel_to_ndc(win_width, win_height, 10.0, 5.0);
+    let top_right = pixel_to_ndc(win_width, win_height, 235.0, 5.0);
+    let bottom_left = pixel_to_ndc(win_width, win_height, 10.0, 40.0);
+    let bottom_right = pixel_to_ndc(win_width, win_height, 235.0, 40.0);
 
-        State {
-            tabs,
-            current_tab: 0,
-            win_width: 800.0,
-            win_height: 600.0,
-        }
-    }
-}
+    let vertices: [f32; 12] = [
+        top_left.0,
+        top_left.1,
+        top_right.0,
+        top_right.1,
+        bottom_right.0,
+        bottom_right.1,
+        bottom_right.0,
+        bottom_right.1,
+        bottom_left.0,
+        bottom_left.1,
+        top_left.0,
+        top_left.1,
+    ];
 
-struct Tab {
-    pages: Vec<Page>,
-    current_page: usize,
-}
-
-impl Tab {
-    fn new() -> Self {
-        let mut pages = Vec::new();
-        let default = Page::new(String::from("New tab"));
-        pages.push(default);
-
-        Tab {
-            pages,
-            current_page: 0,
-        }
-    }
-}
-
-struct Page {
-    elements: Vec<Element>,
-    background_color: Color,
-    name: String,
-}
-
-impl Page {
-    fn new(name: String) -> Self {
-        let elements = Vec::new();
-
-        Page {
-            elements,
-            background_color: (100, 100, 100),
-            name,
-        }
-    }
-}
-
-struct Element {}
-
-fn main() {
-    let mut state = State::new();
-
-    let context = create_sdl2_context();
-
-    let gl = context.0;
-    let window = context.1;
-    let mut events_loop = context.2;
-
-    let shader = shader::Shader::build(&gl, "res/shaders/basic.vert", "res/shaders/basic.frag");
-    shader.activate(&gl);
-
-    let _interval = window.subsystem().gl_set_swap_interval(1);
-
-    let vertices: [f32; 6] = [-0.5, -0.5, 0.5, -0.5, 0.0, 0.5];
-
-    let vao = unsafe {
+    unsafe {
         let vert_ptr: &[u8] = core::slice::from_raw_parts(
             vertices.as_ptr() as *const u8,
             vertices.len() * core::mem::size_of::<f32>(),
@@ -96,7 +47,46 @@ fn main() {
         gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 2 * 4, 0);
 
         vao
-    };
+    }
+}
+impl State {
+    fn new(gl: &glow::Context) -> Self {
+        let win_width = 800.0;
+        let win_height = 600.0;
+        let vao = gen_vao(win_width, win_height, gl);
+
+        State {
+            win_width,
+            win_height,
+            vao,
+        }
+    }
+
+    fn regen_vao(&mut self, gl: &glow::Context) {
+        self.vao = gen_vao(self.win_width, self.win_height, gl);
+    }
+}
+
+fn pixel_to_ndc(win_width: f32, win_height: f32, x: f32, y: f32) -> (f32, f32) {
+    let x_ratio = 2.0 / win_width;
+    let y_ratio = 2.0 / win_height;
+
+    (-1.0 + (x * x_ratio), 1.0 - (y * y_ratio))
+}
+
+fn main() {
+    let context = create_sdl2_context();
+
+    let gl = context.0;
+    let window = context.1;
+    let mut events_loop = context.2;
+
+    let mut state = State::new(&gl);
+
+    let shader = shader::Shader::build(&gl, "res/shaders/basic.vert", "res/shaders/basic.frag");
+    shader.activate(&gl);
+
+    let _interval = window.subsystem().gl_set_swap_interval(1);
 
     'render: loop {
         let should_close = handle_events(&gl, &mut events_loop, &mut state);
@@ -110,8 +100,11 @@ fn main() {
             gl.clear(glow::COLOR_BUFFER_BIT);
 
             shader.activate(&gl);
-            gl.bind_vertex_array(Some(vao));
-            gl.draw_arrays(glow::TRIANGLES, 0, 3);
+            // shader.set_vec2(&gl, "dim", (2.0 / state.win_width, 2.0 / state.win_height));
+
+            state.regen_vao(&gl);
+            gl.bind_vertex_array(Some(state.vao));
+            gl.draw_arrays(glow::TRIANGLES, 0, 6);
         }
 
         window.gl_swap_window();
@@ -133,12 +126,13 @@ fn create_sdl2_context() -> (
         gl_attr.set_context_version(4, 6);
         gl_attr.set_context_flags().forward_compatible().set();
 
-        let window = video
+        let mut window = video
             .window("Browser", 800, 600)
             .opengl()
             .resizable()
             .build()
             .unwrap();
+        let _a = window.set_minimum_size(300, 300);
         let gl_context = window.gl_create_context().unwrap();
         let gl = glow::Context::from_loader_function(|s| video.gl_get_proc_address(s) as *const _);
         let event_loop = sdl.event_pump().unwrap();
@@ -158,6 +152,7 @@ fn handle_events(gl: &glow::Context, events: &mut sdl2::EventPump, state: &mut S
                 sdl2::event::WindowEvent::Resized(x, y) => unsafe {
                     state.win_width = x as f32;
                     state.win_height = y as f32;
+                    state.regen_vao(gl);
                     gl.viewport(0, 0, x, y);
                 },
 

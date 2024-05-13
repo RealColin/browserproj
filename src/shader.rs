@@ -53,4 +53,11 @@ impl Shader {
             gl.use_program(Some(self.prog));
         }
     }
+
+    pub fn set_vec2(&self, gl: &glow::Context, name: &str, val: (f32, f32)) {
+        unsafe {
+            let uniform_location = gl.get_uniform_location(self.prog, name);
+            gl.uniform_2_f32(uniform_location.as_ref(), val.0, val.1);
+        }
+    }
 }
